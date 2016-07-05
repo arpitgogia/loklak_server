@@ -18,6 +18,7 @@
  */
 package org.loklak.api.iot;
 
+import org.eclipse.jetty.util.log.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -117,7 +118,7 @@ public class ImportProfileServlet extends HttpServlet {
             success = DAO.writeImportProfile(importProfileEntry, true);
         } catch (IOException | NullPointerException e) {
             response.sendError(400, "submitted data is invalid : " + e.getMessage());
-            e.printStackTrace();
+            Log.getLog().warn(e);
             return;
         }
 
@@ -187,7 +188,7 @@ public class ImportProfileServlet extends HttpServlet {
         String msg_id = post.get("msg_id", "");
         String detailed = post.get("detailed", "");
         // source_type either has to be null a a valid SourceType value
-        if (!"".equals(source_type) && !SourceType.hasValue(source_type)) {
+        if (!"".equals(source_type) && !SourceType.isValid(source_type)) {
             response.sendError(400, "your request must contain a valid source_type parameter.");
             return;
         }
@@ -211,7 +212,7 @@ public class ImportProfileServlet extends HttpServlet {
                     query += "id:" + msgId + " ";
                 }
                 DAO.SearchLocalMessages search = new DAO.SearchLocalMessages(query, Timeline.Order.CREATED_AT, 0, 1000, 0);
-                entry_to_map.put("imported", search.timeline.toJSON(false).get("statuses"));
+                entry_to_map.put("imported", search.timeline.toJSON(false, "search_metadata", "statuses").get("statuses"));
             }
             entries_to_map.put(entry_to_map);
         }

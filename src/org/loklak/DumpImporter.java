@@ -99,8 +99,8 @@ public class DumpImporter extends Thread {
                                     UserEntry u = new UserEntry(user);
                                     MessageEntry t = new MessageEntry(json);
                                     // record user into search index
-                                    userBulk.add(new IndexEntry<UserEntry>(u.getScreenName(), t.getSourceType().name(), u));
-                                    messageBulk.add(new IndexEntry<MessageEntry>(t.getIdStr(), t.getSourceType().name(), t));
+                                    userBulk.add(new IndexEntry<UserEntry>(u.getScreenName(), t.getSourceType(), u));
+                                    messageBulk.add(new IndexEntry<MessageEntry>(t.getIdStr(), t.getSourceType(), t));
                                     if (userBulk.size() > 1500 || messageBulk.size() > 1500) {
                                         DAO.users.writeEntries(userBulk);
                                         DAO.messages.writeEntries(messageBulk);
@@ -109,7 +109,7 @@ public class DumpImporter extends Thread {
                                     }
                                     newTweets.incrementAndGet();
                                 } catch (IOException e) {
-                                    e.printStackTrace();
+                                	Log.getLog().warn(e);
                                 }
                                 if (LoklakServer.queuedIndexing.isBusy()) try {Thread.sleep(200);} catch (InterruptedException e) {}
                             }
@@ -117,10 +117,10 @@ public class DumpImporter extends Thread {
                                 DAO.users.writeEntries(userBulk);
                                 DAO.messages.writeEntries(messageBulk);
                             } catch (IOException e) {
-                                e.printStackTrace();
+                            	Log.getLog().warn(e);
                             }
                         } catch (InterruptedException e) {
-                            e.printStackTrace();
+                        	Log.getLog().warn(e);
                         }
                     }
                 };

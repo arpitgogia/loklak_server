@@ -22,6 +22,7 @@ package org.loklak.api.p2p;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
 
 import javax.servlet.ServletException;
@@ -29,11 +30,14 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.eclipse.jetty.util.log.Log;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.loklak.QueuedIndexing;
 import org.loklak.data.DAO;
 import org.loklak.data.IndexEntry;
+import org.loklak.http.ClientConnection;
 import org.loklak.http.RemoteAccess;
 import org.loklak.objects.MessageEntry;
 import org.loklak.objects.ProviderType;
@@ -48,6 +52,44 @@ import org.loklak.tools.UTF8;
 public class PushServlet extends HttpServlet {
     
     private static final long serialVersionUID = 7504310048722996407L;
+
+    /**
+     * transmit the timeline to several hosts
+     * @param timeline
+     * @param hoststubs a list of host stubs, i.e. ["http://remoteserver.eu"]
+     * @param peerMessage if message is send to a peer
+     * @return true if the data was transmitted to at least one target peer
+     */
+    public static boolean push(String[] hoststubs, Timeline timeline, boolean peerMessage) {
+        // transmit the timeline        
+        try {
+            String data = timeline.toJSON(false, "search_metadata", "statuses").toString();
+            assert data != null;
+            boolean transmittedToAtLeastOnePeer = false;
+            for (String hoststub: hoststubs) {
+                if (hoststub.endsWith("/")) hoststub = hoststub.substring(0, hoststub.length() - 1);
+                Map<String, byte[]> post = new HashMap<String, byte[]>();
+                post.put("data", UTF8.getBytes(data)); // optionally implement a gzipped form here
+                ClientConnection connection = null;
+                try {
+                    connection = new ClientConnection(hoststub + "/api/push.json", post, !"peers".equals(DAO.getConfig("httpsclient.trustselfsignedcerts", "peers")));
+                    transmittedToAtLeastOnePeer = true;
+                } catch (IOException e) {
+                    //Log.getLog().warn(e);
+                } finally {
+                    if (connection != null) connection.close();
+                }
+            }
+            return transmittedToAtLeastOnePeer;
+        } catch (JSONException e) {
+        	Log.getLog().warn(e);
+            return false;
+        }
+    }
+    
+    public static boolean push(String[] hoststubs, Timeline timeline) {
+        return push(hoststubs, timeline, true);
+    }
 
     /*
      * There are the following sources for data, pushed or retrieved:
@@ -147,9 +189,9 @@ public class PushServlet extends HttpServlet {
                         // existing queries are updated
                         qe.update(tl.period(), false);
                         try {
-                            DAO.queries.writeEntry(new IndexEntry<QueryEntry>(query, qe.getSourceType().name(), qe));
+                            DAO.queries.writeEntry(new IndexEntry<QueryEntry>(query, qe.getSourceType(), qe));
                         } catch (IOException e) {
-                            e.printStackTrace();
+                        	Log.getLog().warn(e);
                         }
                     }
                 }

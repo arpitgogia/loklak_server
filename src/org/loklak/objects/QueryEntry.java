@@ -111,8 +111,8 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
         this.query = (String) json.get("query");
         this.query_length = (int) parseLong((Number) json.get("query_length"));
         String source_type_string = (String) json.get("source_type");
-        if (source_type_string == null) source_type_string = SourceType.USER.name();
-        this.source_type = SourceType.valueOf(source_type_string);
+        if (source_type_string == null) source_type_string = SourceType.TWITTER.toString();
+        this.source_type = new SourceType(source_type_string);
         this.timezoneOffset = (int) parseLong((Number) json.get("timezoneOffset"));
         Date now = new Date();
         this.query_first = parseDate(json.get("query_first"), now);
@@ -225,7 +225,7 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
         JSONObject m = new JSONObject();
         m.put("query", this.query);
         m.put("query_length", this.query_length);
-        m.put("source_type", this.source_type.name());
+        m.put("source_type", this.source_type.toString());
         m.put("timezoneOffset", this.timezoneOffset);
         if (this.query_first != null) m.put("query_first", utcFormatter.print(this.query_first.getTime()));
         if (this.query_last != null) m.put("query_last", utcFormatter.print(this.query_last.getTime()));
@@ -339,8 +339,9 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
         
         public String translate4scraper() {
             // check if a location constraint was given
+            String dateclean = this.raw.replace(" since:hour", "").replace(" since:day", "").replace(" since:week", "").replace(" since:all", "").replace(" since:alltime", "").replace(" since:wholetime", "");
             if (this.bbox == null || this.original.indexOf("near:") > 0) {
-                return this.raw;
+                return dateclean;
             }
             // find place within the bbox
             double lon_west  = this.bbox[0];
@@ -358,7 +359,7 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
             GeoLocation largestCity = DAO.geoNames.getLargestCity(lon_west + lon_border, lat_south + lat_border, lon_east - lon_border, lat_north - lat_border);
             if (largestCity == null) largestCity = DAO.geoNames.getLargestCity(lon_west, lat_south, lon_east, lat_north);
             if (largestCity == null) largestCity = DAO.geoNames.cityNear((lat_north + lat_south) / 2.0, (lon_east + lon_west) / 2.0);
-            String q = this.raw + " near:\"" + largestCity.getNames().iterator().next() + "\" within:" + ((int) (within_km / 1.609344)) + "mi"; // stupid imperial units are stupid
+            String q = dateclean + " near:\"" + largestCity.getNames().iterator().next() + "\" within:" + ((int) (within_km / 1.609344)) + "mi"; // stupid imperial units are stupid
             return q;
         }
     }
@@ -745,7 +746,7 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
                     filters.add(QueryBuilders.regexpQuery(Constraint.link.field_name, regexp));
                 } else if (cs.startsWith(Constraint.source_type.name() + "=")) {
                     String regexp = cs.substring(Constraint.source_type.name().length() + 1);
-                    if (SourceType.hasValue(regexp)) {
+                    if (SourceType.isValid(regexp)) {
                         filters.add(QueryBuilders.constantScoreQuery(QueryBuilders.termQuery("_type", regexp)));
                     }
                 }
@@ -754,7 +755,7 @@ public class QueryEntry extends AbstractObjectEntry implements ObjectEntry {
             for (String cs : constraints_negative) {
                 if (cs.startsWith(Constraint.source_type.name() + "=")) {
                     String regexp = cs.substring(Constraint.source_type.name().length() + 1);
-                    if (SourceType.hasValue(regexp)) {
+                    if (SourceType.isValid(regexp)) {
                         filters.add(QueryBuilders.boolQuery().mustNot(QueryBuilders.constantScoreQuery(QueryBuilders.termQuery("_type", regexp))));
                     }
                 }

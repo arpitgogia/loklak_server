@@ -21,10 +21,9 @@ package org.loklak.api.search;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.URLEncoder;
 import java.util.ConcurrentModificationException;
 import java.util.Date;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -38,6 +37,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.loklak.data.DAO;
 import org.loklak.harvester.TwitterScraper;
+import org.loklak.http.ClientConnection;
 import org.loklak.http.RemoteAccess;
 import org.loklak.objects.MessageEntry;
 import org.loklak.objects.QueryEntry;
@@ -64,6 +64,47 @@ public class SearchServlet extends HttpServlet {
     private final static int SEARCH_CACHE_THREASHOLD_TIME = 3000;
     
     private final static AtomicLong last_cache_search_time = new AtomicLong(10L);
+
+    public final static String backend_hash = Integer.toHexString(Integer.MAX_VALUE);
+    public final static String frontpeer_hash = Integer.toHexString(Integer.MAX_VALUE - 1);
+
+    // possible values: cache, twitter, all
+    public static Timeline search(final String protocolhostportstub, final String query, final Timeline.Order order, final String source, final int count, final int timezoneOffset, final String provider_hash, final long timeout) throws IOException {
+        Timeline tl = new Timeline(order);
+        String urlstring = "";
+        try {
+            urlstring = protocolhostportstub + "/api/search.json?q=" + URLEncoder.encode(query.replace(' ', '+'), "UTF-8") + "&timezoneOffset=" + timezoneOffset + "&maximumRecords=" + count + "&source=" + (source == null ? "all" : source) + "&minified=true&timeout=" + timeout;
+            byte[] jsonb = ClientConnection.downloadPeer(urlstring);
+            if (jsonb == null || jsonb.length == 0) throw new IOException("empty content from " + protocolhostportstub);
+            String jsons = UTF8.String(jsonb);
+            JSONObject json = new JSONObject(jsons);
+            if (json == null || json.length() == 0) return tl;
+            JSONArray statuses = json.getJSONArray("statuses");
+            if (statuses != null) {
+                for (int i = 0; i < statuses.length(); i++) {
+                    JSONObject tweet = statuses.getJSONObject(i);
+                    JSONObject user = tweet.getJSONObject("user");
+                    if (user == null) continue;
+                    tweet.remove("user");
+                    UserEntry u = new UserEntry(user);
+                    MessageEntry t = new MessageEntry(tweet);
+                    tl.add(t, u);
+                }
+            }
+            JSONObject metadata = json.getJSONObject("search_metadata");
+            if (metadata != null) {
+                Integer hits = metadata.has("hits") ? (Integer) metadata.get("hits") : null;
+                if (hits != null) tl.setHits(hits.intValue());
+                String scraperInfo = metadata.has("scraperInfo") ? (String) metadata.get("scraperInfo") : null;
+                if (scraperInfo != null) tl.setScraperInfo(scraperInfo);
+            }
+        } catch (Throwable e) {
+        	//Log.getLog().warn(e);
+            throw new IOException(e.getMessage());
+        }
+        //System.out.println(parser.text());
+        return tl;
+    }
     
     @Override
     protected void doPost(final HttpServletRequest request, final HttpServletResponse response) throws ServletException, IOException {
@@ -93,7 +134,7 @@ public class SearchServlet extends HttpServlet {
         final long timeout = (long) post.get("timeout", DAO.getConfig("search.timeout", 2000));
         final int count = post.isDoS_servicereduction() ? SEARCH_LOW_COUNT : Math.min(post.get("count", post.get("maximumRecords", SEARCH_DEFAULT_COUNT)), post.isLocalhostAccess() ? SEARCH_MAX_LOCALHOST_COUNT : SEARCH_MAX_PUBLIC_COUNT);
         String source = post.isDoS_servicereduction() ? "cache" : post.get("source", "all"); // possible values: cache, backend, twitter, all
-        int agregation_limit = post.get("limit", 100);
+        int agregation_limit = post.get("limit", 10);
         String[] fields = post.get("fields", new String[0], ",");
         int timezoneOffset = post.get("timezoneOffset", 0);
         if (query.indexOf("id:") >= 0 && ("all".equals(source) || "twitter".equals(source))) source = "cache"; // id's cannot be retrieved from twitter with the scrape-api (yet), only from the cache
@@ -102,12 +143,12 @@ public class SearchServlet extends HttpServlet {
         
         // create tweet timeline
         final Timeline tl = new Timeline(order);
-        Map<String, List<Map.Entry<String, Long>>> aggregations = null;
+        JSONObject aggregations = null;
         final QueryEntry.Tokens tokens = new QueryEntry.Tokens(query);
         
         final AtomicInteger cache_hits = new AtomicInteger(0), count_backend = new AtomicInteger(0), count_twitter_all = new AtomicInteger(0), count_twitter_new = new AtomicInteger(0);
         final boolean backend_push = DAO.getConfig("backend.push.enabled", false);
-
+        
         if ("all".equals(source)) {
             // start all targets for search concurrently
             final int timezoneOffsetf = timezoneOffset;
@@ -137,6 +178,7 @@ public class SearchServlet extends HttpServlet {
                     post.recordEvent("cache_time", time);
                     cache_hits.set(localSearchResult.timeline.getHits());
                     tl.putAll(localSearchResult.timeline);
+                    tl.setResultIndex(localSearchResult.timeline.getResultIndex());
                 }
             };
             if (localThread != null) localThread.start();
@@ -185,7 +227,8 @@ public class SearchServlet extends HttpServlet {
             DAO.SearchLocalMessages localSearchResult = new DAO.SearchLocalMessages(query, order, timezoneOffset, last_cache_search_time.get() > SEARCH_CACHE_THREASHOLD_TIME ? SEARCH_LOW_COUNT : count, agregation_limit, fields);
             cache_hits.set(localSearchResult.timeline.getHits());
             tl.putAll(localSearchResult.timeline);
-            aggregations = localSearchResult.aggregations;
+            tl.setResultIndex(localSearchResult.timeline.getResultIndex());
+            aggregations = localSearchResult.getAggregations();
             long time = System.currentTimeMillis() - start;
             last_cache_search_time.set(time);
             post.recordEvent("cache_time", time);
@@ -237,6 +280,7 @@ public class SearchServlet extends HttpServlet {
             metadata.put("time", System.currentTimeMillis() - post.getAccessTime());
             metadata.put("servicereduction", post.isDoS_servicereduction() ? "true" : "false");
             if (tl.getScraperInfo().length() > 0) metadata.put("scraperInfo", tl.getScraperInfo());
+            if (tl.getResultIndex() != null) metadata.put("index", tl.getResultIndex());
             m.put("search_metadata", metadata);
             JSONArray statuses = new JSONArray();
             try {
@@ -252,18 +296,7 @@ public class SearchServlet extends HttpServlet {
             m.put("statuses", statuses);
             
             // aggregations
-            JSONObject agg = new JSONObject(true);
-            if (aggregations != null) {
-                for (Map.Entry<String, List<Map.Entry<String, Long>>> aggregation: aggregations.entrySet()) {
-                    JSONObject facet = new JSONObject(true);
-                    for (Map.Entry<String, Long> a: aggregation.getValue()) {
-                        if (a.getValue().equals(query)) continue; // we omit obvious terms that cannot be used for faceting, like search for "#abc" -> most hashtag is "#abc"
-                        facet.put(a.getKey(), a.getValue());
-                    }
-                    agg.put(aggregation.getKey(), facet);
-                }
-            }
-            m.put("aggregations", agg);
+            m.put("aggregations", aggregations);
             
             // write json
             response.setCharacterEncoding("UTF-8");
@@ -330,8 +363,16 @@ public class SearchServlet extends HttpServlet {
         post.finalize();
         } catch (Throwable e) {
             Log.getLog().warn(e.getMessage(), e);
-            //e.printStackTrace();
+            //Log.getLog().warn(e);
         }
     }
-    
+
+    public static void main(String[] args) {
+        try {
+            Timeline tl = search("http://loklak.org", "beer", Timeline.Order.CREATED_AT, "cache", 20, -120, backend_hash, 10000);
+            System.out.println(tl.toJSON(false, "search_metadata", "statuses").toString(2));
+        } catch (IOException e) {
+        	Log.getLog().warn(e);
+        }
+    }
 }

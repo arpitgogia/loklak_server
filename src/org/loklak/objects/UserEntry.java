@@ -19,6 +19,7 @@
 
 package org.loklak.objects;
 
+import org.eclipse.jetty.util.log.Log;
 import org.elasticsearch.common.Base64;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -71,8 +72,13 @@ public class UserEntry extends AbstractObjectEntry implements ObjectEntry {
     }
 
     
-    public String getType() {
-        return parseString((String) this.map.get("$type"));
+    public SourceType getType() {
+        try {
+            return new SourceType(parseString((String) this.map.get("$type")));
+        } catch (RuntimeException e) {
+        	Log.getLog().warn(e);
+            return null;
+        }
     }
     
     public Number getUser() {

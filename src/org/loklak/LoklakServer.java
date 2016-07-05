@@ -34,6 +34,7 @@ import java.util.Random;
 import java.util.Set;
 
 import javax.servlet.MultipartConfigElement;
+import javax.servlet.Servlet;
 
 import org.eclipse.jetty.rewrite.handler.RewriteHandler;
 import org.eclipse.jetty.rewrite.handler.RewriteRegexRule;
@@ -62,18 +63,16 @@ import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
-import org.eclipse.jetty.security.HashLoginService;
-import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.authentication.BasicAuthenticator;
+import org.loklak.api.admin.AccessServlet;
+import org.loklak.api.admin.CampaignServlet;
 import org.loklak.api.admin.CrawlerServlet;
+import org.loklak.api.admin.SettingsServlet;
 import org.loklak.api.admin.StatusServlet;
 import org.loklak.api.admin.ThreaddumpServlet;
-import org.loklak.api.cms.AppsService;
-import org.loklak.api.cms.AssetServlet;
-import org.loklak.api.cms.DumpDownloadServlet;
-import org.loklak.api.cms.ProxyServlet;
-import org.loklak.api.cms.TopMenu;
+import org.loklak.api.cms.*;
 import org.loklak.api.geo.GeocodeServlet;
+import org.loklak.api.handshake.ClientHandshake;
 import org.loklak.api.iot.FossasiaPushServlet;
 import org.loklak.api.iot.FreifunkNodePushServlet;
 import org.loklak.api.iot.GeoJsonPushServlet;
@@ -82,24 +81,26 @@ import org.loklak.api.iot.NetmonPushServlet;
 import org.loklak.api.iot.NodelistPushServlet;
 import org.loklak.api.iot.OpenWifiMapPushServlet;
 import org.loklak.api.iot.ValidateServlet;
-import org.loklak.api.p2p.Hello;
+import org.loklak.api.p2p.HelloService;
 import org.loklak.api.p2p.PeersServlet;
 import org.loklak.api.p2p.PushServlet;
 import org.loklak.api.search.SearchServlet;
 import org.loklak.api.search.ShortlinkFromTweetServlet;
 import org.loklak.api.search.SuggestServlet;
-import org.loklak.api.server.AccessServlet;
-import org.loklak.api.server.CampaignServlet;
-import org.loklak.api.server.LoginServlet;
-import org.loklak.api.server.UserServlet;
-import org.loklak.api.server.SettingsServlet;
-import org.loklak.api.server.SignUpServlet;
-import org.loklak.api.server.AccountServlet;
+import org.loklak.api.search.SusiService;
+import org.loklak.api.search.ConsoleService;
+import org.loklak.api.search.EventbriteCrawler;
+import org.loklak.api.search.UserServlet;
+import org.loklak.api.search.GenericScraper;
+import org.loklak.api.search.RSSReader;
+import org.loklak.api.tools.CSVServlet;
+import org.loklak.api.tools.XMLServlet;
 import org.loklak.api.vis.MapServlet;
 import org.loklak.api.vis.MarkdownServlet;
 import org.loklak.data.DAO;
 import org.loklak.harvester.TwitterScraper;
 import org.loklak.http.RemoteAccess;
+import org.loklak.server.APIHandler;
 import org.loklak.server.FileHandler;
 import org.loklak.server.HttpsMode;
 import org.loklak.tools.Browser;
@@ -153,6 +154,8 @@ public class LoklakServer {
         Path data = FileSystems.getDefault().getPath("data");
         File dataFile = data.toFile();
         if (!dataFile.exists()) dataFile.mkdirs(); // should already be there since the start.sh script creates it
+        
+        Log.getLog().info("Starting loklak initialization");
 
         // prepare shutdown signal
         File pid = new File(dataFile, "loklak.pid");
@@ -160,11 +163,12 @@ public class LoklakServer {
         
         // prepare signal for startup script
         File startup = new File(dataFile, "startup.tmp");
-        if (!startup.exists()) startup.createNewFile();
-        startup.deleteOnExit();
-        FileWriter writer = new FileWriter(startup);
-		writer.write("startup".toString());
-		writer.close();
+        if (startup.exists()){
+	        startup.deleteOnExit();
+	        FileWriter writer = new FileWriter(startup);
+			writer.write("startup".toString());
+			writer.close();
+        }
         
 		
         // load the config file(s);
@@ -177,11 +181,12 @@ public class LoklakServer {
         }
         
         // check for https modus
-        String httpsString = config.get("https.mode");
-        httpsMode = HttpsMode.OFF;
-        if("on".equals(httpsString)) httpsMode = HttpsMode.ON;
-        else if("redirect".equals(httpsString)) httpsMode = HttpsMode.REDIRECT;
-        else if("only".equals(httpsString)) httpsMode = HttpsMode.ONLY;
+        switch(config.get("https.mode")){
+        	case "on": httpsMode = HttpsMode.ON; break;
+        	case "redirect": httpsMode = HttpsMode.REDIRECT; break;
+        	case "only": httpsMode = HttpsMode.ONLY; break;
+        	default: httpsMode = HttpsMode.OFF;
+        }
         
         // get server ports
         Map<String, String> env = System.getenv();
@@ -241,9 +246,11 @@ public class LoklakServer {
         Log.getLog().info("finished startup!");
         
         // signal to startup script
-        writer = new FileWriter(startup);
-		writer.write("done".toString());
-		writer.close();
+        if (startup.exists()){
+        	FileWriter writer = new FileWriter(startup);
+			writer.write("done".toString());
+			writer.close();
+        }
         
         // ** services are now running **
         
@@ -438,8 +445,7 @@ public class LoklakServer {
         
         if(redirect || auth){
         	
-        	LoginService loginService = new HashLoginService("LoklakRealm", 
-        			DAO.conf_dir.getAbsolutePath() + "/http_auth");
+            org.eclipse.jetty.security.LoginService loginService = new org.eclipse.jetty.security.HashLoginService("LoklakRealm", DAO.conf_dir.getAbsolutePath() + "/http_auth");
         	if(auth) LoklakServer.server.addBean(loginService);
         	
         	Constraint constraint = new Constraint();
@@ -485,14 +491,40 @@ public class LoklakServer {
         htrootContext.setContextPath("/");
 
         File tmp = new File(dataFile, "tmp");
+        MultipartConfigElement multipartConfigDefault = new MultipartConfigElement(tmp.getAbsolutePath());
+        MultipartConfigElement multipartConfig = new MultipartConfigElement(tmp.getAbsolutePath(), multipartConfigDefault.getMaxFileSize(), multipartConfigDefault.getMaxRequestSize(), 1024 * 1024); // reduce IO using a non-zero fileSizeThreshold
         ServletContextHandler servletHandler = new ServletContextHandler();
+
+        // add services
+        @SuppressWarnings("unchecked")
+        Class<? extends Servlet>[] services = new Class[]{
+                SusiService.class,
+                AppsService.class,
+                AuthorizationDemo.class,
+                HelloService.class,
+                ConsoleService.class,
+                SignUpService.class,
+                LoginService.class,
+                PasswordRecoveryService.class,
+                TopMenuService.class,
+        		ClientHandshake.class,
+        		PasswordResetService.class,
+                ChangeUserRole.class,
+                UserManagement.class
+        };
+        for (Class<? extends Servlet> service: services)
+            try {
+                servletHandler.addServlet(service, ((APIHandler) (service.newInstance())).getAPIPath());
+            } catch (InstantiationException | IllegalAccessException e) {
+                e.printStackTrace();
+            }
+        
+        // add servlets        
         servletHandler.addServlet(DumpDownloadServlet.class, "/dump/*");
         servletHandler.addServlet(ShortlinkFromTweetServlet.class, "/x");
         servletHandler.addServlet(AccessServlet.class, "/api/access.json");
         servletHandler.addServlet(AccessServlet.class, "/api/access.html");
         servletHandler.addServlet(AccessServlet.class, "/api/access.txt");
-        servletHandler.addServlet(AppsService.class, new AppsService().getAPIPath());
-        servletHandler.addServlet(Hello.class, new Hello().getAPIPath() /*"/api/hello.json"*/);
         servletHandler.addServlet(PeersServlet.class, "/api/peers.json");
         servletHandler.addServlet(PeersServlet.class, "/api/peers.csv");
         servletHandler.addServlet(CrawlerServlet.class, "/api/crawler.json");
@@ -501,12 +533,12 @@ public class LoklakServer {
         servletHandler.addServlet(SearchServlet.class, "/api/search.json");
         servletHandler.addServlet(SearchServlet.class, "/api/search.txt");
         servletHandler.addServlet(SuggestServlet.class, "/api/suggest.json");
-        ServletHolder accountServletHolder = new ServletHolder(AccountServlet.class);
-        accountServletHolder.getRegistration().setMultipartConfig(new MultipartConfigElement(tmp.getAbsolutePath()));
+        servletHandler.addServlet(XMLServlet.class, "/api/xml2json.json");
+        servletHandler.addServlet(CSVServlet.class, "/api/csv2json.json");
+        ServletHolder accountServletHolder = new ServletHolder(AccountService.class);
+        accountServletHolder.getRegistration().setMultipartConfig(multipartConfig);
         servletHandler.addServlet(accountServletHolder, "/api/account.json");
         servletHandler.addServlet(UserServlet.class, "/api/user.json");
-        servletHandler.addServlet(SignUpServlet.class, "/api/signup.json");
-        servletHandler.addServlet(LoginServlet.class, "/api/login.json");
         servletHandler.addServlet(CampaignServlet.class, "/api/campaign.json");
         servletHandler.addServlet(ImportProfileServlet.class, "/api/import.json");
         servletHandler.addServlet(SettingsServlet.class, "/api/settings.json");
@@ -515,11 +547,14 @@ public class LoklakServer {
         servletHandler.addServlet(ProxyServlet.class, "/api/proxy.png");
         servletHandler.addServlet(ProxyServlet.class, "/api/proxy.jpg");
         servletHandler.addServlet(ValidateServlet.class, "/api/validate.json");
+        servletHandler.addServlet(GenericScraper.class, "/api/genericscraper.json");
+        servletHandler.addServlet(RSSReader.class, "/api/rssreader.json");
+        servletHandler.addServlet(EventbriteCrawler.class, "/api/eventbritecrawler.json");
         ServletHolder pushServletHolder = new ServletHolder(PushServlet.class);
-        pushServletHolder.getRegistration().setMultipartConfig(new MultipartConfigElement(tmp.getAbsolutePath()));
+        pushServletHolder.getRegistration().setMultipartConfig(multipartConfig);
         servletHandler.addServlet(pushServletHolder, "/api/push.json");
         ServletHolder geojsonPushServletHolder = new ServletHolder(GeoJsonPushServlet.class);
-        geojsonPushServletHolder.getRegistration().setMultipartConfig(new MultipartConfigElement(tmp.getAbsolutePath()));
+        geojsonPushServletHolder.getRegistration().setMultipartConfig(multipartConfig);
         servletHandler.addServlet(geojsonPushServletHolder, "/api/push/geojson.json");
         servletHandler.addServlet(FossasiaPushServlet.class, "/api/push/fossasia.json");
         servletHandler.addServlet(OpenWifiMapPushServlet.class, "/api/push/openwifimap.json");
@@ -527,10 +562,10 @@ public class LoklakServer {
         servletHandler.addServlet(FreifunkNodePushServlet.class, "/api/push/freifunknode.json");
         servletHandler.addServlet(NetmonPushServlet.class, "/api/push/netmon.xml");
         ServletHolder assetServletHolder = new ServletHolder(AssetServlet.class);
-        assetServletHolder.getRegistration().setMultipartConfig(new MultipartConfigElement(tmp.getAbsolutePath()));
+        assetServletHolder.getRegistration().setMultipartConfig(multipartConfig);
         servletHandler.addServlet(assetServletHolder, "/api/asset");
+        servletHandler.addServlet(Sitemap.class, "/api/sitemap.xml");
         servletHandler.addServlet(ThreaddumpServlet.class, "/api/threaddump.txt");
-        servletHandler.addServlet(TopMenu.class, new TopMenu().getAPIPath());
         servletHandler.addServlet(MarkdownServlet.class, "/vis/markdown.gif");
         servletHandler.addServlet(MarkdownServlet.class, "/vis/markdown.gif.base64");
         servletHandler.addServlet(MarkdownServlet.class, "/vis/markdown.png");

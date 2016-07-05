@@ -31,10 +31,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.jetty.util.log.Log;
 import org.elasticsearch.search.sort.SortOrder;
-import org.loklak.api.client.PushClient;
-import org.loklak.api.p2p.Hello;
+import org.loklak.api.p2p.HelloService;
+import org.loklak.api.p2p.PushServlet;
 import org.loklak.api.search.SuggestServlet;
 import org.loklak.data.DAO;
+import org.loklak.data.DAO.IndexName;
 import org.loklak.harvester.TwitterAPI;
 import org.loklak.objects.MessageEntry;
 import org.loklak.objects.QueryEntry;
@@ -94,7 +95,7 @@ public class Caretaker extends Thread {
             // check ping
             if (System.currentTimeMillis() - helloPeriod > helloTime) {
                 helloTime = System.currentTimeMillis();
-                Hello.propagate(remote);
+                HelloService.propagate(remote);
             }
             
             // clear caches
@@ -112,7 +113,7 @@ public class Caretaker extends Thread {
             if (tl != null && tl.size() > 0 && remote.length > 0) {
                 // transmit the timeline
                 long start = System.currentTimeMillis();
-                boolean success = PushClient.push(remote, tl);
+                boolean success = PushServlet.push(remote, tl);
                 if (success) {
                     DAO.log("success pushing " + tl.size() + " messages to backend in 1st attempt in " + (System.currentTimeMillis() - start) + " ms");
                 }
@@ -124,7 +125,7 @@ public class Caretaker extends Thread {
                         try {Thread.sleep(3000 + retry * 3000);} catch (InterruptedException e) {}
                         DAO.log("trying to push (again) " + tl.size() + " messages to backend, attempt #" + retry + 1 + "/5");
                         start = System.currentTimeMillis();
-                        if (PushClient.push(remote, tl)) {
+                        if (PushServlet.push(remote, tl)) {
                             DAO.log("success pushing " + tl.size() + " messages to backend in " + (retry + 2) + ". attempt in " + (System.currentTimeMillis() - start) + " ms");
                             success = true;
                             break retrylook;
@@ -205,6 +206,11 @@ public class Caretaker extends Thread {
             
             // heal the latency to give peers with out-dated information a new chance
             DAO.healLatency(0.95f);
+            
+            // delete messages out of time frames
+            DAO.log("Deleted " + DAO.deleteOld(IndexName.messages_hour, DateParser.oneHourAgo()) + " outdated(hour) messages");
+            DAO.log("Deleted " + DAO.deleteOld(IndexName.messages_day, DateParser.oneDayAgo()) + " outdated(day) messages");
+            DAO.log("Deleted " + DAO.deleteOld(IndexName.messages_week, DateParser.oneWeekAgo()) + " outdated(week) messages");
         } catch (Throwable e) {
             Log.getLog().warn("CARETAKER THREAD", e);
         }
@@ -226,8 +232,7 @@ public class Caretaker extends Thread {
             List<String> rsp = OS.execSynchronous(upgradeScript.getAbsolutePath());
             for (String s: rsp) DAO.log("UPGRADE: " + s);
         } catch (IOException e) {
-            DAO.log("UPGRADE failed: " + e.getMessage());
-            e.printStackTrace();
+        	Log.getLog().warn("UPGRADE failed: " + e.getMessage(), e);
         }
     }
     

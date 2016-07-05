@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.eclipse.jetty.util.log.Log;
 import org.json.JSONObject;
 import org.loklak.data.Classifier;
 import org.loklak.data.DAO;
@@ -74,7 +75,7 @@ public class MessageEntry extends AbstractObjectEntry implements ObjectEntry {
         this.created_at = new Date();
         this.on = null;
         this.to = null;
-        this.source_type = SourceType.USER;
+        this.source_type = SourceType.TWITTER;
         this.provider_type = ProviderType.NOONE;
         this.provider_hash = "";
         this.screen_name = "";
@@ -115,9 +116,9 @@ public class MessageEntry extends AbstractObjectEntry implements ObjectEntry {
         Object to_obj = lazyGet(json, "to"); this.to = to_obj == null ? null : parseDate(to);
         String source_type_string = (String) lazyGet(json, "source_type");
         try {
-            this.source_type = source_type_string == null ? SourceType.USER : SourceType.valueOf(source_type_string);
+            this.source_type = source_type_string == null ? SourceType.TWITTER : new SourceType(source_type_string);
         } catch (IllegalArgumentException e) {
-            this.source_type = SourceType.USER;
+            this.source_type = SourceType.TWITTER;
         }
         String provider_type_string = (String) lazyGet(json, "provider_type");
         if (provider_type_string == null) provider_type_string = ProviderType.GENERIC.name();
@@ -527,7 +528,7 @@ public class MessageEntry extends AbstractObjectEntry implements ObjectEntry {
         m.put("id_str", this.id_str);
         if (this.canonical_id != null) m.put("canonical_id", this.canonical_id);
         if (this.parent != null) m.put("parent", this.parent);
-        m.put("source_type", this.source_type.name());
+        m.put("source_type", this.source_type.toString());
         m.put("provider_type", this.provider_type.name());
         if (this.provider_hash != null && this.provider_hash.length() > 0) m.put("provider_hash", this.provider_hash);
         m.put("retweet_count", this.retweet_count);
@@ -604,7 +605,7 @@ public class MessageEntry extends AbstractObjectEntry implements ObjectEntry {
                 s = s.substring(0, p) + ((unicode == 10 || unicode == 13) ? "\n" : ((char) unicode)) + s.substring(q + 1);
             }
         } catch (Throwable e) {
-            e.printStackTrace();
+        	Log.getLog().warn(e);
         }
         // octal coding \\u
         try {
@@ -614,7 +615,7 @@ public class MessageEntry extends AbstractObjectEntry implements ObjectEntry {
                 s = s.substring(0, p) + r + s.substring(p + 6);
             }
         } catch (Throwable e) {
-            e.printStackTrace();
+        	Log.getLog().warn(e);
         }
         // remove tags
         s = A_END_TAG.matcher(s).replaceAll("");

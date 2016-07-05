@@ -45,6 +45,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
@@ -84,6 +85,7 @@ public class ClientConnection {
             .setConnectTimeout(60000)
             .setConnectionRequestTimeout(60000)
             .setContentCompressionEnabled(true)
+            .setCookieSpec(CookieSpecs.IGNORE_COOKIES)
             .build();
     
     private int status;
@@ -180,7 +182,7 @@ public class ClientConnection {
 		                .register("https", trustSelfSignedSocketFactory)
 		                .build();
 			} catch (KeyManagementException | NoSuchAlgorithmException | KeyStoreException e) {
-				e.printStackTrace();
+				Log.getLog().warn(e);
 			}
     	}
         
@@ -305,12 +307,12 @@ public class ClientConnection {
                 try {
                     while ((count = connection.inputStream.read(buffer)) > 0) os.write(buffer, 0, count);
                 } catch (IOException e) {
-                    e.printStackTrace();
+                	Log.getLog().warn(e.getMessage());
                 } finally {
                     os.close();
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+            	Log.getLog().warn(e.getMessage());
             } finally {
                 connection.close();
             }
@@ -337,13 +339,13 @@ public class ClientConnection {
             try {
                 while ((count = connection.inputStream.read(buffer)) > 0) baos.write(buffer, 0, count);
             } catch (IOException e) {
-                e.printStackTrace();
+            	Log.getLog().warn(e.getMessage());
             } finally {
                 connection.close();
             }
             return baos.toByteArray();
         } catch (IOException e) {
-            e.printStackTrace();
+        	Log.getLog().warn(e.getMessage());
             return null;
         }
     }

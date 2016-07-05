@@ -22,15 +22,16 @@ package org.loklak.server;
 import java.time.Instant;
 
 import org.json.JSONObject;
-import org.loklak.tools.storage.JsonFile;
+import org.loklak.tools.storage.JsonTray;
 
 /**
  * Authentication asks: who is the user. This class holds user identification details
  */
 public class Authentication {
 
-    private JsonFile parent;
+    private JsonTray parent;
     private JSONObject json;
+    private ClientCredential credential;
 
     /**
      * create a new authentication object. The given json object must be taken
@@ -39,14 +40,25 @@ public class Authentication {
      * @param json object for storage of the authorization
      * @param parent the parent file or null if there is no parent file (no persistency)
      */
-    public Authentication(JSONObject json, JsonFile parent) {
-        this.json = json;
+    public Authentication(ClientCredential credential, JsonTray parent) {
+    	if(parent != null){
+	    	if(parent.has(credential.toString())){
+	        	this.json = parent.getJSONObject(credential.toString());
+	        }
+	        else{
+	        	this.json = new JSONObject();
+	        	parent.put(credential.toString(), this.json, credential.isPersistent());
+	        }
+    	}
+    	else this.json = new JSONObject();
+    	
         this.parent = parent;
+        this.credential = credential;
     }
     
     public Authentication setIdentity(ClientIdentity id) {
         this.json.put("id", id.toString());
-        if (this.parent != null) this.parent.commit();
+        if (this.parent != null && this.credential.isPersistent()) this.parent.commit();
         return this;
     }
     
@@ -57,11 +69,45 @@ public class Authentication {
 
     public void setExpireTime(long time){
     	this.json.put("expires_on", Instant.now().getEpochSecond() + time);
-    	if (this.parent != null) this.parent.commit();
+    	if (this.parent != null && this.credential.isPersistent()) this.parent.commit();
     }
     
     public boolean checkExpireTime(){
-    	if(this.json.has("expires_on") && this.json.getLong("expires_on") > Instant.now().getEpochSecond()) return true;
-    	return false;
+    	if(this.json.has("expires_on")){
+    		if(this.json.getLong("expires_on") > Instant.now().getEpochSecond()) return true;
+    		return false;
+    	}
+    	return true;
+    }
+    
+    public Object get(String key){
+    	return this.json.get(key);
+    }
+    
+    public String getString(String key){
+    	return this.json.getString(key);
+    }
+    
+    public boolean getBoolean(String key){
+    	return this.json.getBoolean(key);
+    }
+    
+    public boolean has(String key){
+    	return this.json.has(key);
+    }
+    
+    public void put(String key, Object value){
+    	this.json.put(key, value);
+    	if (this.parent != null && this.credential.isPersistent()) this.parent.commit();
+    }
+    
+    public void remove(String key){
+    	this.json.remove(key);
+    	if (this.parent != null && this.credential.isPersistent()) this.parent.commit();
+    }
+    
+    public void delete(){
+    	this.parent.remove(this.credential.toString());
+    	parent = null;
     }
 }

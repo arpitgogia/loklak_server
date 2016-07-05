@@ -1,63 +1,114 @@
 $(document).ready(function()
 {
-    var emailerr = false, passerr = false, checked = false, session = true;
+	var emailerr = false, passerr = false, checked = false, session = true, logout = false;
 
-    $('#pass').focus(function(){
-        checkEmpty();
-    })
+	$.ajax(	"/api/login.json", {
+		dataType: 'json',
+		success: function (response) {
+			if(response.loggedIn){
+				$('#status-box').text(response.message);
+				$('#status-box').addClass("error");
+				$('#login').text("Logout");
+				$('#pass').addClass("hidden");
+				$('#email').addClass("hidden");
+				$('#remember').addClass("hidden");
+				$('#rememberme').addClass("hidden");
+				$('#signup').addClass("hidden");
+				$('#forgot-password').addClass("hidden");
+				logout = true;
+			}
+		},
+		error: function (xhr, ajaxOptions, thrownError) {
+			$('#status-box').text(thrownError);
+			$('#status-box').addClass("error");
+		},
+	});
 
-    $('#remember').click(function(){
-        if($(this).prop("checked")){
-            checked = true;
-        } else{
-            checked = false;
-        }
-    });
+	$('#pass').focus(function(){
+		checkEmpty();
+	})
 
-    $('#login').click(function(){
-        checkEmpty();
-        var total = passerr || emailerr;
-        if(total){
-            alert("Please fill empty fields");
-        } else{
-            var mail = encodeURIComponent($('#email').val());
-            var pwd = encodeURIComponent($('#pass').val());
-            var posting = $.post( "/api/login.json", { login: mail, password: pwd, request_cookie: checked, request_session: session }, function(data) {
-                console.log(data.status);
-                console.log(data.reason);
-                alert(data.status + ", " + data.reason);
-            }, "json" );
-        }
-    });
+	$('#remember').click(function(){
+		if($(this).prop("checked")){
+			checked = true;
+		} else{
+			checked = false;
+		}
+	});
 
-    function checkEmpty(){
-        var emailval = $('#email').val();
-        var passval = $('#pass').val();
-        if(!emailval && !($('#email').is(":focus"))){
-            $('#emailfield').text("Required field!");
-            $('#email').removeClass();
-            $('#emailfield').removeClass();
-            $('#email').addClass("error");
-            $('#emailfield').addClass("error");
-            emailerr = true;
-        } else {
-            emailerr = false;
-            $('#email').removeClass();
-            $('#emailfield').removeClass();
-            $('#emailfield').text("");
-        }
-        if(!passval && !($('#pass').is(":focus"))){
-            $('#passfield').text("Required field!");
-            $('#pass').removeClass();
-            $('#passfield').removeClass();
-            $('#pass').addClass("error");
-            $('#passfield').addClass("error");
-            passerr = true;
-        } else {
-            passerr = false;
-            $('#pass').removeClass();
-            $('#passfield').removeClass();
-            $('#passfield').text("");
-        }
-    }
+	$('#login').click(function(){
+		if(logout){
+			$.ajax(	"/api/login.json", {
+				data: { logout: true },
+				dataType: 'json',
+				success: function (response) {
+					$('#login').text("Login");
+					$('#email').removeClass();
+					$('#pass').removeClass();
+					$('#remember').removeClass();
+					$('#rememberme').removeClass();
+					$('#signup').removeClass();
+					$('#forgot-password').removeClass();
+					$('#status-box').text("");
+					$('#status-box').removeClass();
+					logout = false;
+				},
+				error: function (xhr, ajaxOptions, thrownError) {
+					$('#status-box').text(thrownError);
+					$('#status-box').addClass("error");
+				},
+			});
+			return;
+		}
+		
+		checkEmpty();
+		var total = passerr || emailerr;
+		if(!total){
+			var mail = encodeURIComponent($('#email').val());
+			var pwd = encodeURIComponent($('#pass').val());
+			
+			$.ajax(	"/api/login.json", {
+				data: { login: mail, password: pwd, request_cookie: checked, request_session: session },
+				dataType: 'json',
+				success: function (response) {
+					window.location = '/apps/applist/index.html';
+				},
+				error: function (xhr, ajaxOptions, thrownError) {
+					$('#status-box').text(thrownError);
+					$('#status-box').addClass("error");
+				},
+			});
+		}
+	});
+
+	function checkEmpty(){
+		var emailval = $('#email').val();
+		var passval = $('#pass').val();
+		if(!emailval && !($('#email').is(":focus"))){
+			$('#emailfield').text("Required field!");
+			$('#email').removeClass();
+			$('#emailfield').removeClass();
+			$('#email').addClass("error");
+			$('#emailfield').addClass("error");
+			emailerr = true;
+		} else {
+			emailerr = false;
+			$('#email').removeClass();
+			$('#emailfield').removeClass();
+			$('#emailfield').text("");
+		}
+		if(!passval && !($('#pass').is(":focus"))){
+			$('#passfield').text("Required field!");
+			$('#pass').removeClass();
+			$('#passfield').removeClass();
+			$('#pass').addClass("error");
+			$('#passfield').addClass("error");
+			passerr = true;
+		} else {
+			passerr = false;
+			$('#pass').removeClass();
+			$('#passfield').removeClass();
+			$('#passfield').text("");
+		}
+	}
 });
